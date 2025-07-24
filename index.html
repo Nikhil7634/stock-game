@@ -17,10 +17,8 @@
             font-family: 'Inter', sans-serif;
             background: #ffffff;
             color: #1a1a1a;
-            overflow-x: hidden;
             min-height: 100vh;
             position: relative;
-            touch-action: none;
         }
         
         .game-container {
@@ -28,6 +26,7 @@
             margin: 0 auto;
             position: relative;
             background: #ffffff;
+            overflow-y: auto; /* Allow vertical scrolling */
         }
         
         .header {
@@ -58,7 +57,7 @@
             box-shadow: 0 4px 20px rgba(0,0,0,0.08);
             max-width: 95vw;
             height: auto;
-            touch-action: none;
+            touch-action: pinch-zoom; /* Allow pinch-zoom, prevent default panning */
         }
         
         .hud {
@@ -322,7 +321,6 @@
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(0,0,0,0.3);
             background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-            color: green;
         }
         
         .game-btn:active {
@@ -341,6 +339,10 @@
         
         /* Mobile Responsive */
         @media (max-width: 768px) {
+            .game-container {
+                padding-bottom: 20px; /* Ensure content is accessible */
+            }
+            
             .hud {
                 grid-template-columns: repeat(2, 1fr);
                 margin: 10px;
@@ -429,10 +431,15 @@
 </head>
 <body>
     <div class="game-container">
+        <div class="header">
+            <h1>NiftyGroww Market Sniper</h1>
+            <p>Trade smart, aim sharp, grow your portfolio!</p>
+        </div>
+        
         <div class="start-screen" id="startScreen">
             <h1>Welcome to Market Sniper</h1>
             <p>Test your trading instincts! Wait for the right moment, build patience, and execute trades to grow your portfolio. Avoid traps and manage your risk wisely!</p>
-            <button class="game-btn start-btn" id="startButton">🚀 Start Trading</button>
+            <button class="game-btn start-btn" onclick="startGame()">🚀 Start Trading</button>
         </div>
         
         <div class="hud">
@@ -468,12 +475,12 @@
                 <div class="instruction-item">🟢 Wait for green CALL setups</div>
                 <div class="instruction-item">🔵 Target blue PUT opportunities</div>
                 <div class="instruction-item">🔴 Avoid red market traps</div>
-                <div class="instruction-item">🖱 Hold mouse to build patience</div>
-                <div class="instruction-item">📈 Click to execute trades</div>
+                <div class="instruction-item">🖱 Hold touch to build patience</div>
+                <div class="instruction-item">📈 Tap to execute trades</div>
             </div>
             
             <div class="button-container">
-                <button class="game-btn end-btn" id="endButton">🏁 End Session</button>
+                <button class="game-btn end-btn" onclick="endGame()">🏁 End Session</button>
             </div>
         </div>
         
@@ -484,20 +491,47 @@
             <p>Your portfolio has been liquidated</p>
             <p style="font-weight: 600; color: #2c3e50;">Final Portfolio: ₹<span id="finalPortfolio">0</span></p>
             <p style="font-size: 14px; margin-top: 15px;">Accuracy: <span id="finalAccuracy">0</span>% | Best Streak: <span id="finalStreak">0</span></p>
-            <button class="game-btn start-btn" id="restartButton">🔄 Start New Session</button>
+            <button class="game-btn start-btn" onclick="restartGame()">🔄 Start New Session</button>
         </div>
     </div>
 
     <script>
-        // Game state variables
-        let canvas, ctx, gridCanvas, gridCtx;
-        let crosshair, startScreen;
-        let gameState = {};
-        let opportunities = [], explosions = [];
-        let opportunityPool = [], explosionPool = [];
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const crosshair = document.getElementById('crosshair');
+        const startScreen = document.getElementById('startScreen');
+        
+        // Performance optimizations
+        let gridCanvas, gridCtx;
+        let gridDrawn = false;
+        let lastMouseMove = 0;
         let mouseX = 0, mouseY = 0;
         let crosshairUpdateRequested = false;
-        let animationFrameId = null;
+        
+        // Game state
+        let gameState = {
+            portfolio: 100000,
+            accuracy: 0,
+            streak: 0,
+            bestStreak: 0,
+            shots: 0,
+            hits: 0,
+            patience: 0,
+            maxPatience: 100,
+            isCharging: false,
+            riskLevel: 'Conservative',
+            gameRunning: false
+        };
+        
+        // Trading opportunities and explosions pools
+        const MAX_OPPORTUNITIES = 6;
+        const MAX_EXPLOSIONS = 10;
+        let opportunities = [];
+        let explosions = [];
+        
+        // Object pools for better memory management
+        const opportunityPool = [];
+        const explosionPool = [];
         
         // Indian stock symbols
         const indianStocks = [
@@ -506,50 +540,58 @@
             'TITAN', 'NESTLEIND', 'KOTAKBANK', 'LTIM', 'TECHM', 'HINDUNILVR'
         ];
         
-        // Initialize game elements
-        function initGameElements() {
-            canvas = document.getElementById('gameCanvas');
-            ctx = canvas.getContext('2d');
-            crosshair = document.getElementById('crosshair');
-            startScreen = document.getElementById('startScreen');
-            
-            // Create grid canvas for performance
+        // Lazy initialization to defer heavy setup
+        function initializeGameResources() {
             gridCanvas = document.createElement('canvas');
             gridCtx = gridCanvas.getContext('2d');
-            
-            // Initialize game state
-            gameState = {
-                portfolio: 100000,
-                accuracy: 0,
-                streak: 0,
-                bestStreak: 0,
-                shots: 0,
-                hits: 0,
-                patience: 0,
-                maxPatience: 100,
-                isCharging: false,
-                riskLevel: 'Conservative',
-                gameRunning: false
-            };
-            
-            // Initialize object pools
             initPools();
-            
-            // Set up event listeners
-            setupEventListeners();
-            
-            // Initial canvas setup
             resizeCanvas();
+        }
+        
+        // Responsive canvas sizing
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            const maxWidth = Math.min(container.clientWidth - 40, 1000);
+            const aspectRatio = 600 / 1000;
+            
+            canvas.width = maxWidth;
+            canvas.height = maxWidth * aspectRatio;
+            canvas.style.width = maxWidth + 'px';
+            canvas.style.height = (maxWidth * aspectRatio) + 'px';
+            
+            // Resize grid canvas
+            gridCanvas.width = canvas.width;
+            gridCanvas.height = canvas.height;
+            drawGrid();
+        }
+        
+        // Draw grid once and cache it
+        function drawGrid() {
+            gridCtx.fillStyle = '#fafafa';
+            gridCtx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
+            
+            gridCtx.strokeStyle = '#f0f0f0';
+            gridCtx.lineWidth = 1;
+            
+            for (let x = 0; x <= gridCanvas.width; x += 50) {
+                gridCtx.beginPath();
+                gridCtx.moveTo(x, 0);
+                gridCtx.lineTo(x, gridCanvas.height);
+                gridCtx.stroke();
+            }
+            
+            for (let y = 0; y <= gridCanvas.height; y += 50) {
+                gridCtx.beginPath();
+                gridCtx.moveTo(0, y);
+                gridCtx.lineTo(gridCanvas.width, y);
+                gridCtx.stroke();
+            }
+            
+            gridDrawn = true;
         }
         
         // Initialize object pools
         function initPools() {
-            const MAX_OPPORTUNITIES = 6;
-            const MAX_EXPLOSIONS = 10;
-            
-            opportunityPool = [];
-            explosionPool = [];
-            
             for (let i = 0; i < MAX_OPPORTUNITIES; i++) {
                 opportunityPool.push(new TradingOpportunity());
             }
@@ -558,7 +600,6 @@
             }
         }
         
-        // Trading Opportunity class
         class TradingOpportunity {
             constructor() {
                 this.active = false;
@@ -622,7 +663,6 @@
                 ctx.globalAlpha = alpha;
                 ctx.translate(this.x, this.y);
                 
-                // Background circle with clean design
                 if (this.type === 'call') {
                     ctx.fillStyle = '#27ae60';
                     ctx.strokeStyle = '#219a52';
@@ -640,13 +680,11 @@
                 ctx.lineWidth = 3;
                 ctx.stroke();
                 
-                // Inner white circle for better contrast
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
                 ctx.beginPath();
                 ctx.arc(0, 0, (this.size - 8) * pulse, 0, Math.PI * 2);
                 ctx.fill();
                 
-                // Text with better contrast
                 ctx.fillStyle = '#2c3e50';
                 ctx.font = 'bold 11px Inter';
                 ctx.textAlign = 'center';
@@ -658,7 +696,6 @@
                 
                 ctx.restore();
                 
-                // Patience requirement indicator
                 if (gameState.patience < this.requiredPatience) {
                     ctx.fillStyle = '#e74c3c';
                     ctx.font = '12px Inter';
@@ -674,7 +711,6 @@
             }
         }
         
-        // Explosion class
         class Explosion {
             constructor(x, y, type, profit) {
                 this.active = false;
@@ -696,7 +732,6 @@
                 this.maxLifespan = 60;
                 this.particles = [];
                 
-                // Create particles
                 for (let i = 0; i < 12; i++) {
                     this.particles.push({
                         x: 0,
@@ -749,7 +784,6 @@
                     ctx.fill();
                 });
                 
-                // Profit/loss text with better styling
                 if (this.lifespan > 30) {
                     ctx.globalAlpha = 1;
                     ctx.fillStyle = this.type === 'profit' ? '#27ae60' : '#e74c3c';
@@ -763,53 +797,9 @@
             }
         }
         
-        // Draw grid once and cache it
-        function drawGrid() {
-            gridCtx.fillStyle = '#fafafa';
-            gridCtx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
-            
-            gridCtx.strokeStyle = '#f0f0f0';
-            gridCtx.lineWidth = 1;
-            
-            // Draw vertical lines
-            for (let x = 0; x <= gridCanvas.width; x += 50) {
-                gridCtx.beginPath();
-                gridCtx.moveTo(x, 0);
-                gridCtx.lineTo(x, gridCanvas.height);
-                gridCtx.stroke();
-            }
-            
-            // Draw horizontal lines
-            for (let y = 0; y <= gridCanvas.height; y += 50) {
-                gridCtx.beginPath();
-                gridCtx.moveTo(0, y);
-                gridCtx.lineTo(gridCanvas.width, y);
-                gridCtx.stroke();
-            }
-        }
-        
-        // Responsive canvas sizing
-        function resizeCanvas() {
-            const container = canvas.parentElement;
-            const maxWidth = Math.min(container.clientWidth - 40, 1000);
-            const aspectRatio = 600 / 1000;
-            
-            canvas.width = maxWidth;
-            canvas.height = maxWidth * aspectRatio;
-            canvas.style.width = maxWidth + 'px';
-            canvas.style.height = (maxWidth * aspectRatio) + 'px';
-            
-            // Resize grid canvas
-            gridCanvas.width = canvas.width;
-            gridCanvas.height = canvas.height;
-            drawGrid();
-        }
-        
-        // Spawn new trading opportunity
         function spawnOpportunity() {
-            if (opportunities.length >= 6) return;
+            if (opportunities.length >= MAX_OPPORTUNITIES) return;
             
-            // Find an inactive opportunity from the pool
             const opportunity = opportunityPool.find(opp => !opp.active);
             if (opportunity) {
                 opportunity.init();
@@ -817,7 +807,6 @@
             }
         }
         
-        // Update patience meter
         function updatePatience() {
             if (gameState.isCharging && gameState.patience < gameState.maxPatience) {
                 gameState.patience += 0.6;
@@ -827,13 +816,11 @@
             
             gameState.patience = Math.max(0, Math.min(gameState.maxPatience, gameState.patience));
             
-            // Update patience bar and percentage
             const patienceFill = document.getElementById('patienceFill');
             const patiencePercent = document.getElementById('patiencePercent');
             patienceFill.style.width = gameState.patience + '%';
             patiencePercent.textContent = Math.round(gameState.patience) + '%';
             
-            // Update risk level based on patience
             if (gameState.patience < 30) {
                 gameState.riskLevel = 'Aggressive';
             } else if (gameState.patience < 70) {
@@ -843,24 +830,20 @@
             }
         }
         
-        // Execute a trade
         function executeTrade(opportunity) {
             gameState.shots++;
             
             if (gameState.patience < opportunity.requiredPatience) {
-                // Insufficient patience - bad trade
                 const loss = opportunity.risk;
                 gameState.portfolio -= loss;
                 gameState.streak = 0;
                 createExplosion(opportunity.x, opportunity.y, 'loss', loss);
             } else if (opportunity.type === 'trap') {
-                // Trap - always lose
                 const loss = opportunity.risk;
                 gameState.portfolio -= loss;
                 gameState.streak = 0;
                 createExplosion(opportunity.x, opportunity.y, 'loss', loss);
             } else {
-                // Good trade
                 const profit = Math.round(opportunity.profit * (gameState.patience / 100));
                 gameState.portfolio += profit;
                 gameState.hits++;
@@ -869,24 +852,19 @@
                 createExplosion(opportunity.x, opportunity.y, 'profit', profit);
             }
             
-            // Update accuracy
             gameState.accuracy = Math.round((gameState.hits / gameState.shots) * 100);
             
-            // Reset the opportunity
             opportunity.reset();
             opportunities = opportunities.filter(opp => opp !== opportunity);
             
-            // Check game over
             if (gameState.portfolio <= 0) {
                 endGame();
             }
         }
         
-        // Create explosion effect
         function createExplosion(x, y, type, profit) {
-            if (explosions.length >= 10) return;
+            if (explosions.length >= MAX_EXPLOSIONS) return;
             
-            // Find an inactive explosion from the pool
             const explosion = explosionPool.find(exp => !exp.active);
             if (explosion) {
                 explosion.init(x, y, type, profit);
@@ -894,7 +872,6 @@
             }
         }
         
-        // Update HUD elements
         function updateHUD() {
             document.getElementById('portfolio').textContent = gameState.portfolio.toLocaleString();
             document.getElementById('accuracy').textContent = gameState.accuracy + '%';
@@ -902,43 +879,34 @@
             document.getElementById('risk').textContent = gameState.riskLevel;
         }
         
-        // Main game loop
         function gameLoop() {
             if (!gameState.gameRunning) return;
             
-            // Clear canvas with cached grid
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(gridCanvas, 0, 0);
             
-            // Update and draw opportunities
             opportunities = opportunities.filter(opp => {
                 const alive = opp.update();
                 if (alive) opp.draw();
                 return alive;
             });
             
-            // Update and draw explosions
             explosions = explosions.filter(exp => {
                 const alive = exp.update();
                 if (alive) exp.draw();
                 return alive;
             });
             
-            // Spawn new opportunities
-            if (Math.random() < 0.015 && opportunities.length < 6) {
+            if (Math.random() < 0.015 && opportunities.length < MAX_OPPORTUNITIES) {
                 spawnOpportunity();
             }
             
-            // Update patience
             updatePatience();
-            
-            // Update HUD
             updateHUD();
             
-            animationFrameId = requestAnimationFrame(gameLoop);
+            requestAnimationFrame(gameLoop);
         }
         
-        // Get event position relative to canvas
         function getEventPos(e) {
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
@@ -950,7 +918,6 @@
             };
         }
         
-        // Mouse/touch event handlers
         function handleMouseDown(e) {
             if (!gameState.gameRunning) return;
             gameState.isCharging = true;
@@ -985,7 +952,6 @@
             
             const pos = getEventPos(e);
             
-            // Check for hits
             for (let i = opportunities.length - 1; i >= 0; i--) {
                 if (opportunities[i].isClicked(pos.x, pos.y)) {
                     executeTrade(opportunities[i]);
@@ -1002,7 +968,6 @@
             
             const pos = getEventPos(e.touches[0]);
             
-            // Check for hits
             for (let i = opportunities.length - 1; i >= 0; i--) {
                 if (opportunities[i].isClicked(pos.x, pos.y)) {
                     executeTrade(opportunities[i]);
@@ -1024,86 +989,62 @@
                     requestAnimationFrame(updateCrosshair);
                 }
             }
-            e.preventDefault();
+            // Do not prevent default to allow scrolling
         }
         
-        // Setup event listeners
-        function setupEventListeners() {
-            // Game control buttons
-            document.getElementById('startButton').addEventListener('click', startGame);
-            document.getElementById('endButton').addEventListener('click', endGame);
-            document.getElementById('restartButton').addEventListener('click', restartGame);
-            
-            // Canvas events
-            canvas.addEventListener('mousedown', handleMouseDown);
-            canvas.addEventListener('touchstart', handleTouchStart);
-            canvas.addEventListener('mouseup', handleMouseUp);
-            canvas.addEventListener('touchend', handleMouseUp);
-            canvas.addEventListener('click', handleClick);
-            canvas.addEventListener('mousemove', handleMouseMove);
-            canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-            
-            // Window resize
-            window.addEventListener('resize', resizeCanvas);
-        }
-        
-        // Start the game
         function startGame() {
             startScreen.classList.add('hidden');
+            initializeGameResources();
             gameState.gameRunning = true;
-            
-            // Reset game state
-            gameState.portfolio = 100000;
-            gameState.accuracy = 0;
-            gameState.streak = 0;
-            gameState.bestStreak = 0;
-            gameState.shots = 0;
-            gameState.hits = 0;
-            gameState.patience = 0;
-            gameState.riskLevel = 'Conservative';
-            
-            // Reset all objects
-            opportunities.forEach(opp => opp.reset());
-            explosions.forEach(exp => exp.reset());
-            opportunities = [];
-            explosions = [];
-            
-            // Spawn initial opportunities
             spawnOpportunity();
             spawnOpportunity();
-            
-            // Start game loop
-            animationFrameId = requestAnimationFrame(gameLoop);
-            
-            // Update HUD
-            updateHUD();
+            setupEventListeners();
+            gameLoop();
         }
         
-        // End the game
         function endGame() {
             gameState.gameRunning = false;
-            
-            // Cancel any pending animation frame
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-                animationFrameId = null;
-            }
-            
-            // Show game over screen
             document.getElementById('finalPortfolio').textContent = gameState.portfolio.toLocaleString();
             document.getElementById('finalAccuracy').textContent = gameState.accuracy;
             document.getElementById('finalStreak').textContent = gameState.bestStreak;
             document.getElementById('gameOver').style.display = 'block';
         }
         
-        // Restart the game
         function restartGame() {
+            gameState = {
+                portfolio: 100000,
+                accuracy: 0,
+                streak: 0,
+                bestStreak: 0,
+                shots: 0,
+                hits: 0,
+                patience: 0,
+                maxPatience: 100,
+                isCharging: false,
+                riskLevel: 'Conservative',
+                gameRunning: true
+            };
+            
+            opportunities.forEach(opp => opp.reset());
+            explosions.forEach(exp => exp.reset());
+            opportunities = [];
+            explosions = [];
+            
             document.getElementById('gameOver').style.display = 'none';
-            startGame();
+            startScreen.classList.add('hidden');
+            gameLoop();
         }
         
-        // Initialize the game when DOM is loaded
-        document.addEventListener('DOMContentLoaded', initGameElements);
+        function setupEventListeners() {
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('touchstart', handleTouchStart);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('touchend', handleMouseUp);
+            canvas.addEventListener('click', handleClick);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('touchmove', handleTouchMove);
+            window.addEventListener('resize', resizeCanvas);
+        }
     </script>
 </body>
 </html>
